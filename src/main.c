@@ -28,6 +28,7 @@
 #include "input.h"
 #include "menu.h"
 #include "settings.h"
+#include "replay.h"
 
 #define JOY_DEADZONE 1700
 #define CPAD_BOUND 0x5d0
@@ -38,6 +39,7 @@
 #define MENU_JOYPAD 2
 #define MENU_NET 3
 #define MENU_INFO 4
+#define MENU_REPLAY 5
 
 const char *font_path = "DejaVuSans.ttf";
 TTF_Font *font;
@@ -111,47 +113,63 @@ int connect_to_3ds(const char *addr)
 void send_frame()
 {
 	if(sock_fd == -1) return;
+
 	char v[20];
-	uint32_t hid_state = ~hid_buttons;
-	uint32_t circle_state = 0x7ff7ff;
-	uint32_t cstick_state = 0x80800081;
-	uint32_t touch_state = 0x2000000;
 
-	if(circle_x != 0 || circle_y != 0) // Do circle magic. 0x5d0 is the upper/lower bound of circle pad input
+	if(is_replay_playing()) // get command from replay file
 	{
-		uint32_t x = circle_x;
-		uint32_t y = circle_y;
-		x = ((x * CPAD_BOUND) / 32768) + 2048;
-		y = ((y * CPAD_BOUND) / 32768) + 2048;
-		circle_state = x | (y << 12);
+		get_command_replay(&v);
 	}
-
-	if(cstick_x != 0 || cstick_y != 0 || zlzr_state != 0)
+	else // create command
 	{
-		double x = cstick_x / 32768.0;
-		double y = cstick_y / 32768.0;
+		uint32_t hid_state = ~hid_buttons;
+		uint32_t circle_state = 0x7ff7ff;
+		uint32_t cstick_state = 0x80800081;
+		uint32_t touch_state = 0x2000000;
 
-		// We have to rotate the c-stick position 45deg. Thanks, Nintendo.
-		uint32_t xx = (uint32_t)((x+y) * M_SQRT1_2 * CPP_BOUND) + 0x80;
-		uint32_t yy = (uint32_t)((y-x) * M_SQRT1_2 * CPP_BOUND) + 0x80;
+		if(circle_x != 0 || circle_y != 0) // Do circle magic. 0x5d0 is the upper/lower bound of circle pad input
+		{
+			uint32_t x = circle_x;
+			uint32_t y = circle_y;
+			x = ((x * CPAD_BOUND) / 32768) + 2048;
+			y = ((y * CPAD_BOUND) / 32768) + 2048;
+			circle_state = x | (y << 12);
+		}
 
-		cstick_state = (yy&0xff) << 24 | (xx&0xff) << 16 | (zlzr_state&0xff) << 8 | 0x81;
+		if(cstick_x != 0 || cstick_y != 0 || zlzr_state != 0)
+		{
+			double x = cstick_x / 32768.0;
+			double y = cstick_y / 32768.0;
+
+			// We have to rotate the c-stick position 45deg. Thanks, Nintendo.
+			uint32_t xx = (uint32_t)((x+y) * M_SQRT1_2 * CPP_BOUND) + 0x80;
+			uint32_t yy = (uint32_t)((y-x) * M_SQRT1_2 * CPP_BOUND) + 0x80;
+
+			cstick_state = (yy&0xff) << 24 | (xx&0xff) << 16 | (zlzr_state&0xff) << 8 | 0x81;
+		}
+
+		if(touching) // This is good enough.
+		{
+			uint32_t x = touch_x;
+			uint32_t y = touch_y;
+			x = (x * 4096) / window_w;
+			y = (y * 4096) / window_h;
+			touch_state = x | (y << 12) | (0x01 << 24);
+		}
+
+		memcpy(v, &hid_state, 4);
+		memcpy(v + 4, &touch_state, 4);
+		memcpy(v + 8, &circle_state, 4);
+		memcpy(v + 12, &cstick_state, 4);
+		memcpy(v + 16, &special_buttons, 4);
+
+		if (curr_state == ACCEPTING_INPUT && is_replay_playing() == 0 && is_replay_recording() == 1)
+		{
+			save_command_replay(
+				create_raw_cmd(hid_state, circle_state, cstick_state, touch_state, special_buttons)
+			);
+		}
 	}
-
-	if(touching) // This is good enough.
-	{
-		uint32_t x = touch_x;
-		uint32_t y = touch_y;
-		x = (x * 4096) / window_w;
-		y = (y * 4096) / window_h;
-		touch_state = x | (y << 12) | (0x01 << 24);
-	}
-
-	memcpy(v, &hid_state, 4);
-	memcpy(v + 4, &touch_state, 4);
-	memcpy(v + 8, &circle_state, 4);
-	memcpy(v + 12, &cstick_state, 4);
-	memcpy(v + 16, &special_buttons, 4);
 
 	int i = sendto(sock_fd, v, 20, 0, (struct sockaddr*)&sock_addr, sizeof(struct sockaddr_in));
 }
@@ -391,6 +409,43 @@ void update_screen()
 		sprintf(buff, "Frame frequency: every %i ms", settings.frame_ms);
 		draw_text(buff, c, 0, h * 2, NULL, NULL);
 	}
+	else if(menus[curr_state].type == REPLAY)
+	{
+		// view replay
+		num_items = 4;
+
+		SDL_Color c = curr_item == 0 ? highlight_color : font_color;
+
+		char *buff = NULL;
+
+		c = curr_item == 0 ? highlight_color : font_color;
+
+		asprintf(&buff, "Replay enabled: %s", is_replay_recording() == 1 ? "On" : "Off");
+		draw_text(buff, c, 0, h, &w, NULL);
+
+		c = curr_item == 1 ? highlight_color : font_color;
+
+		asprintf(&buff, "Replay name: %s", REPLAY_FILENAME_PRE);
+		draw_text(buff, c, 0, h * 2, NULL, NULL);
+
+		c = curr_item == 2 ? highlight_color : font_color;
+
+		asprintf(&buff, "Playing Replay: %s", is_replay_playing() == 1 ? "On" : "Off");
+		draw_text(buff, c, 0, h * 3, NULL, NULL);
+
+		c = curr_item == 3 ? highlight_color : font_color;
+
+		asprintf(&buff, "Chose replay to play: %s", REPLAY_PLAY_NAME);
+		draw_text(buff, c, 0, h * 4, NULL, NULL);
+
+		c = curr_item == 4 ? highlight_color : font_color;
+
+		if(strlen(REPLAY_MSG) > 0)
+		{
+			asprintf(&buff, "%s", REPLAY_MSG);
+			draw_text(buff, c, 0, h * 5, NULL, NULL);
+		}
+	}
 	else if(menus[curr_state].type == INFO)
 	{
 		int num_lines = 5;
@@ -398,6 +453,7 @@ void update_screen()
 								"F1 = Bindings (Keyboard)",
 								"F2 = Bindings (Controller)",
 								"F3 = Network Settings",
+								"F4 = Replay",
 								"Esc = Back (or quit)"};
 		int y = h;
 
@@ -599,6 +655,73 @@ void process_menu(SDL_Event *ev, int curr_menu)
 				}
 			}
 		}
+		else if(capture && curr_menu == 4) // Replay
+		{
+			SDL_Keycode key = ev->key.keysym.sym;
+			uint16_t mod = ev->key.keysym.mod;
+
+			if(key == SDLK_MINUS && (mod == KMOD_RSHIFT || mod == KMOD_LSHIFT))
+				key = '_';
+
+			if(curr_item == 0 && key == SDLK_RETURN) // toggle replay record
+			{
+				capture = 0;
+				toggle_replay_recording();
+				// enable direct recording
+				if(is_replay_recording())
+					curr_state = ACCEPTING_INPUT;
+			}
+
+			if(curr_item == 1) // replay's name to save
+			{
+				size_t len_filename = strlen(REPLAY_FILENAME_PRE);
+				if ((key >= SDLK_0 && key <= SDLK_9) || (key >= SDLK_a && key <= SDLK_z)
+					|| (key == SDLK_UNDERSCORE))
+				{
+					modify_replay_default_name(key);
+				}
+
+				if (key == SDLK_BACKSPACE && len_filename > 0)
+				{
+					delete_replay_default_name();
+				}
+
+				if (key == SDLK_RETURN)
+				{
+					if (len_filename == 0)
+					{
+						restore_replay_default_name();
+					}
+					capture = 0;
+				}
+			}
+
+			if(curr_item == 2) // toggle replay play
+			{
+				capture = 0;
+				toggle_replay_playing();
+			}
+
+			if(curr_item == 3) // replay's name to play
+			{
+				size_t len_filename = strlen(REPLAY_FILENAME_PRE);
+				if ((key >= SDLK_0 && key <= SDLK_9) || (key >= SDLK_a && key <= SDLK_z)
+					|| (key == SDLK_UNDERSCORE))
+				{
+					modify_replay_playing_name(key);
+				}
+
+				if (key == SDLK_BACKSPACE && len_filename > 0)
+				{
+					delete_replay_playing_name();
+				}
+
+				if (key == SDLK_RETURN)
+				{
+					capture = 0;
+				}
+			}
+		}
 		else
 		{
 			switch(ev->key.keysym.sym)
@@ -752,6 +875,15 @@ int main(int argc, char *argv[])
 					curr_item = 0;
 					curr_state = MENU_NET;
 				}
+				else if(ev.key.keysym.sym == SDLK_F4)
+				{
+					curr_item = 0;
+					curr_state = MENU_REPLAY;
+
+					// stop recording when invoking menu (if I don't do this, the replay'll get some noise)
+					if(is_replay_recording())
+						toggle_replay_recording();
+				}
 			}
 			else if((ev.type == SDL_WINDOWEVENT && ev.window.event == SDL_WINDOWEVENT_CLOSE) || ev.type == SDL_QUIT)
 			{
@@ -771,6 +903,8 @@ int main(int argc, char *argv[])
 				case 1:
 				case 2:
 				case 3:
+				case 4:
+				case 5:
 					process_menu(&ev, curr_state-1);
 				break;
 			}

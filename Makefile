@@ -1,5 +1,5 @@
-OBJS=obj/settings.o obj/input.o obj/main.o
-HEADERS=src/input.h src/settings.h src/menu.h
+OBJS=obj/replay.o obj/settings.o obj/input.o obj/main.o
+HEADERS=src/replay.h src/input.h src/settings.h src/menu.h
 
 $(info Checking current platform)
 UNAME = $(shell uname -s)
