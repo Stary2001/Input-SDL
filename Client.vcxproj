@@ -135,11 +135,13 @@
     <ClInclude Include="src\input.h" />
     <ClInclude Include="src\menu.h" />
     <ClInclude Include="src\settings.h" />
+    <ClInclude Include="src\replay.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\input.c" />
     <ClCompile Include="src\main.c" />
     <ClCompile Include="src\settings.c" />
+    <ClCompile Include="src\replay.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
