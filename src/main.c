@@ -165,9 +165,7 @@ void send_frame()
 
 		if (curr_state == ACCEPTING_INPUT && is_replay_playing() == 0 && is_replay_recording() == 1)
 		{
-			save_command_replay(
-				create_raw_cmd(hid_state, circle_state, cstick_state, touch_state, special_buttons)
-			);
+			save_command_replay(&v);
 		}
 	}
 
@@ -416,34 +414,33 @@ void update_screen()
 
 		SDL_Color c = curr_item == 0 ? highlight_color : font_color;
 
-		char *buff = NULL;
+		char buff[256];
 
 		c = curr_item == 0 ? highlight_color : font_color;
 
-		asprintf(&buff, "Replay enabled: %s", is_replay_recording() == 1 ? "On" : "Off");
+		snprintf(buff, sizeof(buff), "Replay enabled: %s", is_replay_recording() == 1 ? "On" : "Off");
 		draw_text(buff, c, 0, h, &w, NULL);
 
 		c = curr_item == 1 ? highlight_color : font_color;
 
-		asprintf(&buff, "Replay name: %s", REPLAY_FILENAME_PRE);
+		snprintf(buff, sizeof(buff), "Replay name: %s", replay_filename_prefix);
 		draw_text(buff, c, 0, h * 2, NULL, NULL);
 
 		c = curr_item == 2 ? highlight_color : font_color;
 
-		asprintf(&buff, "Playing Replay: %s", is_replay_playing() == 1 ? "On" : "Off");
+		snprintf(buff, sizeof(buff), "Playing Replay: %s", is_replay_playing() == 1 ? "On" : "Off");
 		draw_text(buff, c, 0, h * 3, NULL, NULL);
 
 		c = curr_item == 3 ? highlight_color : font_color;
 
-		asprintf(&buff, "Chose replay to play: %s", REPLAY_PLAY_NAME);
+		snprintf(buff, sizeof(buff), "Chose replay to play: %s", replay_play_name);
 		draw_text(buff, c, 0, h * 4, NULL, NULL);
 
 		c = curr_item == 4 ? highlight_color : font_color;
 
-		if(strlen(REPLAY_MSG) > 0)
+		if(strlen(replay_msg) > 0)
 		{
-			asprintf(&buff, "%s", REPLAY_MSG);
-			draw_text(buff, c, 0, h * 5, NULL, NULL);
+			draw_text(replay_msg, c, 0, h * 5, NULL, NULL);
 		}
 	}
 	else if(menus[curr_state].type == INFO)
@@ -674,7 +671,7 @@ void process_menu(SDL_Event *ev, int curr_menu)
 
 			if(curr_item == 1) // replay's name to save
 			{
-				size_t len_filename = strlen(REPLAY_FILENAME_PRE);
+				size_t len_filename = strlen(replay_filename_prefix);
 				if ((key >= SDLK_0 && key <= SDLK_9) || (key >= SDLK_a && key <= SDLK_z)
 					|| (key == SDLK_UNDERSCORE))
 				{
@@ -704,7 +701,7 @@ void process_menu(SDL_Event *ev, int curr_menu)
 
 			if(curr_item == 3) // replay's name to play
 			{
-				size_t len_filename = strlen(REPLAY_FILENAME_PRE);
+				size_t len_filename = strlen(replay_filename_prefix);
 				if ((key >= SDLK_0 && key <= SDLK_9) || (key >= SDLK_a && key <= SDLK_z)
 					|| (key == SDLK_UNDERSCORE))
 				{

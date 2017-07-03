@@ -1,79 +1,84 @@
 #include "replay.h"
 
 // initial valeus
-char *REPLAY_FILENAME_PRE = "replay_";
-char *REPLAY_PLAY_NAME = "...";
-char *REPLAY_MSG = "";
+char replay_filename_prefix[50] = "replay_";
+char replay_play_name[50] = "...";
+char replay_msg[100] = "";
 const char *REPLAY_FILENAME_DEFAULT_PRE = "replay_";
 const char *REPLAY_FILENAME_SUFFIX = ".replay";
 const char *REPLAY_FOLDER = "./replay";
-int RECORDING_TURN_ON = -1;
-int REPLAY_PLAYING = -1;
+int recording_turn_on = 0;
+int replay_playing = 0;
 
 FILE *file_replay_writer = NULL;
 FILE *file_replay_reader = NULL;
 
 FILE* get_new_file_replay()
 {
-	char *filename = NULL;
+	char filename[150];
+	int count_char;
 	uint32_t count = 0;
 	do {
-		asprintf(&filename, "%s/%s%d%s", REPLAY_FOLDER, REPLAY_FILENAME_PRE, count, REPLAY_FILENAME_SUFFIX);
+		count_char = snprintf(filename, sizeof(filename), "%s/%s%d%s",
+								REPLAY_FOLDER, replay_filename_prefix, count, REPLAY_FILENAME_SUFFIX);
 		count++;
+
+		if (count_char > sizeof(filename)) {
+			snprintf(replay_msg, sizeof(replay_msg), "%s", "Error: Replay's name too big.");
+			return NULL;
+		}
 	} while(access(filename, W_OK) == 0);
 
 	return fopen(filename, "wb");
 }
 
-struct command_raw create_raw_cmd(uint32_t hid_state, uint32_t circle_state, uint32_t cstick_state, uint32_t touch_state, uint32_t special_buttons)
+void save_command_replay(char **v[20])
 {
-	struct command_raw r;
-	r.hid_state = hid_state;
-	r.circle_state = circle_state;
-	r.cstick_state = cstick_state;
-	r.touch_state = touch_state;
-	r.special_buttons = special_buttons;
+	char cmd[20] = "";
 
-	return r;
-}
-
-void save_command_replay(struct command_raw cmd_raw)
-{
-	char cmd[20];
-	memcpy(cmd, &cmd_raw.hid_state, 4);
-	memcpy(cmd + 4, &cmd_raw.touch_state, 4);
-	memcpy(cmd + 8, &cmd_raw.circle_state, 4);
-	memcpy(cmd + 12, &cmd_raw.cstick_state, 4);
-	memcpy(cmd + 16, &cmd_raw.special_buttons, 4);
-
+	memcpy(cmd, v, sizeof(cmd));
 	fwrite(cmd, sizeof(cmd), 1, file_replay_writer);
 }
 
 void toggle_replay_recording()
 {
-	RECORDING_TURN_ON *= -1;
+	recording_turn_on = !recording_turn_on;
+	replay_msg[0] = '\0';
 
-	if (RECORDING_TURN_ON == 1) {
-		file_replay_writer = get_new_file_replay();
+	if (recording_turn_on == 1) {
+		if (!(file_replay_writer = get_new_file_replay())) {
+			recording_turn_on = !recording_turn_on;
+		}
 	}
 	else {
 		fclose(file_replay_writer);
-		asprintf(&REPLAY_MSG, "%s", "INFO: Replay saved.");
+		snprintf(replay_msg, sizeof(replay_msg), "%s", "Info: Replay saved.");
 	}
 }
 
 void toggle_replay_playing()
 {
-	REPLAY_PLAYING *= -1;
-	strcpy(REPLAY_MSG, "");
+	replay_playing = !replay_playing;
+	replay_msg[0] = '\0';
 
-	if (REPLAY_PLAYING == 1) {
-		char *filename = NULL;
-		asprintf(&filename, "%s/%s%s", REPLAY_FOLDER, REPLAY_PLAY_NAME, REPLAY_FILENAME_SUFFIX);
+	if (replay_playing == 1) {
+		char filename[150] = "";
+		int count_char;
+		count_char = snprintf(filename, sizeof(filename), "%s/%s%s", REPLAY_FOLDER, replay_play_name, REPLAY_FILENAME_SUFFIX);
+
+		if (count_char > sizeof(filename)) {
+			toggle_replay_playing();
+			snprintf(replay_msg, sizeof(replay_msg), "%s", "Error: Can't play replay, name too big.");
+			return;
+		}
+
 		if (!(file_replay_reader = fopen(filename, "rb"))) {
 			toggle_replay_playing();
-			asprintf(&REPLAY_MSG, "%s", "Error: Replay file does not exists!");
+			snprintf(replay_msg, sizeof(replay_msg), "%s", "Error: Replay file does not exist!");
+			return;
 		}
+
+		snprintf(replay_msg, sizeof(replay_msg), "%s", "Playing replay...");
 	}
 	else {
 		fclose(file_replay_reader);
@@ -82,57 +87,49 @@ void toggle_replay_playing()
 
 int is_replay_recording()
 {
-	return RECORDING_TURN_ON == 1 ? 1 : 0;
+	return recording_turn_on;
 }
 
 int is_replay_playing()
 {
-	return REPLAY_PLAYING == 1 ? 1 : 0;
+	return replay_playing;
 }
 
 void modify_replay_default_name(char new_key)
 {
-	char *new_name = (char*) malloc(1*strlen(REPLAY_FILENAME_PRE));
-	memcpy(new_name, REPLAY_FILENAME_PRE, strlen(REPLAY_FILENAME_PRE)+1);
-
-	if(strcmp(REPLAY_FILENAME_PRE, "replay_") == 0) { // first time editing
-		strcpy(new_name, "");
+	if(strcmp(replay_filename_prefix, REPLAY_FILENAME_DEFAULT_PRE) == 0) { // first time editing
+		replay_filename_prefix[0] = '\0';
 	}
 
-	// add new char
-	asprintf(&REPLAY_FILENAME_PRE, "%s%c\0", new_name, new_key);
+	size_t len = strlen(replay_filename_prefix);
+	snprintf(replay_filename_prefix+len, sizeof(replay_filename_prefix)-len, "%c", new_key);
 }
 
 void delete_replay_default_name()
 {
-	size_t len = strlen(REPLAY_FILENAME_PRE);
-	memmove(REPLAY_FILENAME_PRE, REPLAY_FILENAME_PRE, len-1);
-	REPLAY_FILENAME_PRE[len-1] = '\0';
+	size_t len = strlen(replay_filename_prefix);
+	replay_filename_prefix[len-1] = '\0';
 }
 
 void modify_replay_playing_name(char new_key)
 {
-	char *new_name = (char*) malloc(1*strlen(REPLAY_PLAY_NAME));
-	memcpy(new_name, REPLAY_PLAY_NAME, strlen(REPLAY_PLAY_NAME)+1);
-
-	if(strcmp(REPLAY_PLAY_NAME, "...") == 0) { // first time editing
-		strcpy(new_name, "");
+	if(strcmp(replay_play_name, "...") == 0) { // first time editing
+		replay_play_name[0] = '\0';
 	}
 
-	// add new char
-	asprintf(&REPLAY_PLAY_NAME, "%s%c\0", new_name, new_key);
+	size_t len = strlen(replay_play_name);
+	snprintf(replay_play_name+len, sizeof(replay_play_name)-len, "%c", new_key);
 }
 
 void delete_replay_playing_name()
 {
-	size_t len = strlen(REPLAY_PLAY_NAME);
-	memmove(REPLAY_PLAY_NAME, REPLAY_PLAY_NAME, len-1);
-	REPLAY_PLAY_NAME[len-1] = '\0';
+	size_t len = strlen(replay_play_name);
+	replay_play_name[len-1] = '\0';
 }
 
 void restore_replay_default_name()
 {
-	strcpy(REPLAY_FILENAME_PRE, REPLAY_FILENAME_DEFAULT_PRE);
+	strcpy(replay_filename_prefix, REPLAY_FILENAME_DEFAULT_PRE);
 }
 
 void get_command_replay(char **v[20])
@@ -140,7 +137,7 @@ void get_command_replay(char **v[20])
 	char cmd[20];
 	if(fread(cmd, sizeof(cmd), 1, file_replay_reader) != 1) {
 		toggle_replay_playing();
-		asprintf(&REPLAY_MSG, "%s", "INFO: Replay played with success.");
+		snprintf(replay_msg, sizeof(replay_msg), "%s", "Info: Replay played with success.");
 	}
 
 	memcpy(v, &cmd, sizeof(cmd));
